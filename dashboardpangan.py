@@ -335,7 +335,7 @@ with tab_rekomendasi:
         pilih_prov = st.selectbox("Pilih Wilayah Provinsi untuk Analisis Skenario:", 
                                   prov_list, index=default_idx, key="sb_rekomendasi")
 
-    st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='bottom: 20px;'></div>", unsafe_allow_html=True)
     st.markdown("### Proyeksi Skenario Makro & Stress-Testing Kebijakan")
     
     # [3] PANEL KONTROL SLIDER
@@ -361,7 +361,7 @@ with tab_rekomendasi:
         cc3.metric(label="Proyeksi Harga Daging Ayam", value=f"Rp {val_ayam:,.0f}/Kg", delta="Parameter Input", delta_color="off")
         cc4.metric(label="Magnitudo Shock Musiman", value=f"{val_shock} %", delta="Parameter Input", delta_color="off")
 
-    # [4] GRAFIK PREDIKSI MUSIMAN (BATANG DINAMIS, GARIS TETAP STATIS)
+    # [4] GRAFIK PREDIKSI MUSIMAN (BATANG DINAMIS BERBASIS LOGIKA NORMALITAS IKLIM)
     st.markdown("<div class='content-card' style='margin-top: 20px;'>", unsafe_allow_html=True)
     st.markdown("### Profil Musiman Neraca Spasial Jagung Tiap Provinsi")
     st.markdown("<p style='font-size:13px; color:#64748b; margin-top:-10px; margin-bottom:15px;'>Analisis Rata-rata Suplai Pertanian vs Kebutuhan Pakan Ayam Ras Pedaging berdasarkan Profil Historis Riil Daerah.</p>", unsafe_allow_html=True)
@@ -369,26 +369,32 @@ with tab_rekomendasi:
     months_list = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
     baseline_data = baseline_months.get(st.session_state.selected_province, [0]*12)
     
-    # 1. Logika Perubahan Data Batap (Bar Chart) -> Sensitif terhadap geseran slider
-    deviasi_hujan = (val_hujan - 180) * 110
+    # PERBAIKAN LOGIKA: Curah hujan ideal = 180mm. Jika abnormal (<140 atau >220), neraca tanaman berkurang (turun).
+    # Semakin menjauhi titik ideal 180mm, pengurangan nilai neraca akan semakin drastis secara kuadratis.
+    jarak_hujan_ideal = abs(val_hujan - 180)
+    if jarak_hujan_ideal <= 40:
+        deviasi_hujan = 0  # Kondisi normal toleran
+    else:
+        deviasi_hujan = -1.8 * ((jarak_hujan_ideal - 40) ** 1.6)
+
     deviasi_harga_j = (val_jagung - 5500) * -6
     deviasi_harga_a = (val_ayam - 34000) * -1.5
     deviasi_shock = val_shock * -200
     
     total_shock = int(deviasi_hujan + deviasi_harga_j + deviasi_harga_a + deviasi_shock)
-    simulated_data = [int(val + total_shock) for val in baseline_data]
+    simulated_data = [int(val + total_shock) if val != 0 else 0 for val in baseline_data] # Jakarta tetap 0 netral
             
     bar_colors = ['#10b981' if x >= 0 else '#ef4444' for x in simulated_data]
     
     fig_prediksi = go.Figure()
     
-    # Trace 1: Diagram Batang (Dinamis / Bergerak mengikuti slider)
+    # Trace 1: Diagram Batang (Dinamis / Responsif secara akurat)
     fig_prediksi.add_trace(go.Bar(
         x=months_list, y=simulated_data, name="Simulasi Neraca Aktual",
         marker_color=bar_colors, opacity=0.85
     ))
     
-    # Trace 2: Diagram Garis (DIKUNCI STATIS -> Menggunakan data baseline historis asli sebagai rerata)
+    # Trace 2: Diagram Garis (Statis dari Baseline Rata-rata Historis)
     fig_prediksi.add_trace(go.Scatter(
         x=months_list, y=baseline_data, name="Garis Rata-rata Bulanan (Statis)",
         mode='lines+markers', line=dict(color='#334155', width=3, dash='solid'),
@@ -404,14 +410,15 @@ with tab_rekomendasi:
     st.plotly_chart(fig_prediksi, use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # [5] KONDISI STRUKTURAL & PENJELASAN SKOR RISIKO MELALUI SLIDER
+    # [5] KONDISI STRUKTURAL & PENJELASAN SKOR RISIKO YANG DISESUAIKAN DENGAN GRAFIK NERACA
     skor_risiko = 0
-    if val_hujan > 300 or val_hujan < 100: skor_risiko += 20
+    if val_hujan > 220 or val_hujan < 140: 
+        skor_risiko += min(30, int(jarak_hujan_ideal * 0.15))
     
     if val_jagung > 5500:
-        skor_risiko += min(35, int((val_jagung - 5500) / 271))
+        skor_risiko += min(30, int((val_jagung - 5500) / 310))
     if val_ayam > 34000:
-        skor_risiko += min(25, int((val_ayam - 34000) / 1640))
+        skor_risiko += min(20, int((val_ayam - 34000) / 2050))
     if val_shock > 15:
         skor_risiko += min(20, int((val_shock - 15) * 0.24))
     
@@ -420,7 +427,7 @@ with tab_rekomendasi:
             <div class="status-card-green">
                 <h4 style="margin:0 0 6px 0; font-weight:600; font-size:15px; color:#166534;">KONDISI STRUKTURAL: AMAN, KONDUSIF & STABIL ({skor_risiko}/100)</h4>
                 <p style="margin:0; font-size:13.5px; color:#1e293b; opacity:0.85;">
-                    Matriks kalkulasi otomatis di wilayah <b>{st.session_state.selected_province}</b> berada pada koridor aman. Transmisi harga makro seimbang.
+                    Matriks kalkulasi otomatis di wilayah <b>{st.session_state.selected_province}</b> berada pada koridor aman. Profil grafik batang menunjukkan produktivitas tanaman optimal berkat parameter iklim dan harga makro yang seimbang.
                 </p>
             </div>"""
     elif skor_risiko <= 60:
@@ -428,15 +435,15 @@ with tab_rekomendasi:
             <div class="status-card-yellow">
                 <h4 style="margin:0 0 6px 0; font-weight:600; font-size:15px; color:#92400e;">KONDISI STRUKTURAL: WASPADA RISIKO TEKANAN ({skor_risiko}/100)</h4>
                 <p style="margin:0; font-size:13.5px; color:#1e293b; opacity:0.85;">
-                    Terdeteksi anomali pada salah satu parameter di wilayah <b>{st.session_state.selected_province}</b>. Diperlukan monitoring berkala rantai pasok.
+                    Terdeteksi penyusutan volume aktual pada grafik batang di wilayah <b>{st.session_state.selected_province}</b> akibat anomali parameter iklim/harga. Diperlukan monitoring berkala pada kestabilan stok logistik daerah.
                 </p>
             </div>"""
     else:
         status_html = f"""
             <div class="status-card-red">
-                <h4 style="margin:0 0 6px 0; font-weight:600; font-size:15px; color:#991b1b;">KONDISI STRUKTURAL: AWAS, RAWAN SHOCK INFLASI ({skor_risiko}/100)</h4>
+                <h4 style="margin:0 0 6px 0; font-weight:600; font-size:15px; color:#991b1b;">KONDISI STRUKTURAL: AWAS, RAWAN SHOCK INFLASI & DEFISIT EKSTREM ({skor_risiko}/100)</h4>
                 <p style="margin:0; font-size:13.5px; color:#1e293b; opacity:0.85;">
-                    <b>Kombinasi parameter memicu tekanan krisis inflasi ekstrem</b> di wilayah <b>{st.session_state.selected_province}</b>. Lonjakan harga pakan hulu dan daging hilir tidak terkendali, diperlukan intervensi pasokan darurat segera!
+                    <b>Kombinasi parameter ekstrem memicu kemerosotan tajam grafik batang neraca pangan</b> di wilayah <b>{st.session_state.selected_province}</b>. Curah hujan abnormal terbukti merusak komoditas hulu, lonjakan defisit tak terkendali, diperlukan intervensi pasokan darurat segera!
                 </p>
             </div>"""
             
@@ -493,15 +500,15 @@ with tab_rekomendasi:
         """, unsafe_allow_html=True)
 
     # REKOMENDASI UTAMA BERDASARKAN SLIDER PARAMETER
-    if val_shock > 40 or val_ayam > 45000 or val_jagung > 8000:
-        rec_pemda = f"Sektor sedang berada pada ambang batas krisis inflasi tinggi. Pemda {st.session_state.selected_province} bersama TPID diinstruksikan segera memberlakukan Harga Eceran Tertinggi (HET) darurat, menggelar pasar murah, serta mengajukan mobilisasi stok cadangan pangan nasional."
+    if val_shock > 40 or val_ayam > 45000 or val_jagung > 8000 or val_hujan > 300 or val_hujan < 100:
+        rec_pemda = f"Sektor sedang berada pada ambang batas krisis akibat guncangan makro/iklim. Pemda {st.session_state.selected_province} bersama TPID diinstruksikan segera memberlakukan strategi mitigasi darurat, stabilisasi HET, serta mobilisasi jembatan logistik antar-provinsi."
     else:
         rec_pemda = "Mengoptimalkan manajemen cadangan pangan pemerintah daerah via pembaruan berkala sistem data neraca spasial digital untuk memitigasi transmisi guncangan pasokan antar-provinsi."
 
-    if val_hujan > 300:
-        rec_petani = "Mengacu pada pedoman mitigasi iklim basah ekstrem, petani direkomendasikan meningkatkan kapasitas jaringan drainase makro lahan guna menghindari waterlogging serta mengoptimalkan penggunaan vertical dryer pengering mekanis."
-    elif val_hujan < 100:
-        rec_petani = "Sesuai dengan strategi adaptasi El Nino, direkomendasikan beralih masal ke varietas benih hibrida umur pendek toleran kekeringan (e.g., BIMA) serta integrasi teknologi sumur renteng."
+    if val_hujan > 220:
+        rec_petani = "Mengacu pada pedoman mitigasi iklim basah ekstrem (over-saturation), petani direkomendasikan meningkatkan kapasitas jaringan drainase makro lahan guna menghindari pembusukan akar tanaman serta mengoptimalkan mesin pengerang mekanis (vertical dryer)."
+    elif val_hujan < 140:
+        rec_petani = "Sesuai dengan strategi adaptasi El Nino (kekeringan), direkomendasikan beralih masal ke varietas benih hibrida umur pendek toleran kekeringan (e.g., BIMA) serta optimalisasi pompanisasi air tanah."
     else:
         rec_petani = "Mempertahankan pola tanam terjadwal berbasis kalender iklim (Katam), meminimalkan kadar air panen (<14%) untuk menjaga nilai tawar komoditas."
 
